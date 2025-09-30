@@ -1443,7 +1443,7 @@
 
         // --- НАВІГАЦІЯ ---
 
-        function showPage(pageId) {
+        async function showPage(pageId) {
             pages.forEach(page => {
                 page.classList.remove('active');
             });
@@ -1460,7 +1460,7 @@
             if (pageId === 'products') {
                 fetchProducts();
             } else if (pageId === 'cart') {
-                renderCart();
+                await renderCart();
             } else if (pageId === 'admin') {
                 checkAdminAuth();
             }
@@ -1695,36 +1695,40 @@
             }, 300);
         }
 
-        function renderCart() {
+        async function renderCart() {
             const cartItemsContainer = document.getElementById('cart-items');
             cartItemsContainer.innerHTML = '';
             let currentTotal = 0;
 
             if (cart.length === 0) {
                 cartItemsContainer.innerHTML = '<p class="text-gray-500 text-lg p-4 bg-gray-50 rounded-lg">Кошик порожній. Додайте щось із каталогу!</p>';
+                saveCart();
+                updateCartTotal();
+                return;
             }
 
-            cart.forEach(item => {
-                // Спочатку шукаємо товар у поточному списку products
-                let product = products.find(p => p.id == item.id);
-                
-                // Якщо товар не знайдений і це може бути товар з прихованої категорії,
-                // робимо окремий API запит для отримання цього товару
-                if (!product) {
-                    fetchHiddenProductForCart(item.id).then(hiddenProduct => {
-                        if (hiddenProduct) {
-                            renderCartItem(item, hiddenProduct, cartItemsContainer);
-                        }
-                    });
-                    return;
+            // Отримуємо всі товари для кошика (включно з прихованими)
+            const cartProducts = await Promise.all(
+                cart.map(async (item) => {
+                    let product = products.find(p => p.id == item.id);
+                    if (!product) {
+                        product = await fetchHiddenProductForCart(item.id);
+                    }
+                    return { item, product };
+                })
+            );
+
+            // Рендеримо всі товари
+            cartProducts.forEach(({ item, product }) => {
+                if (product) {
+                    renderCartItem(item, product, cartItemsContainer);
                 }
-                
-                renderCartItem(item, product, cartItemsContainer);
             });
 
             saveCart();
-            updateCartTotal();
+            await updateCartTotal();
 
+            // Додаємо обробники подій після рендерингу всіх товарів
             document.querySelectorAll('.quantity-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     const id = e.currentTarget.dataset.id;
@@ -1816,94 +1820,61 @@
             container.appendChild(itemElement);
         }
 
-        // Оновлена версія для роботи з прихованими товарами
-        function renderCartOld() {
-            const cartItemsContainer = document.getElementById('cart-items');
-            cartItemsContainer.innerHTML = '';
-            let currentTotal = 0;
 
-            if (cart.length === 0) {
-                cartItemsContainer.innerHTML = '<p class="text-gray-500 text-lg p-4 bg-gray-50 rounded-lg">Кошик порожній. Додайте щось із каталогу!</p>';
+
+        function renderCartItem(item, product, container) {
+            let itemPrice = product.price;
+            if (product.is_on_sale && product.discount_percentage > 0) {
+                itemPrice = product.price * (1 - product.discount_percentage / 100);
             }
 
-            cart.forEach(item => {
-                const product = products.find(p => p.id == item.id);
+            const itemTotal = itemPrice * item.quantity;
 
-                if (!product) {
-                    return;
-                }
+            let imageUrl = '';
+            if (product.image_url && product.image_url.startsWith('http')) {
+                imageUrl = product.image_url;
+            } else if (product.image_url) {
+                imageUrl = UPLOAD_DIR + product.image_url;
+            } else {
+                imageUrl = 'https://placehold.co/64x64/94a3b8/ffffff?text=X';
+            }
 
-                let itemPrice = product.price;
-                if (product.is_on_sale && product.discount_percentage > 0) {
-                    itemPrice = product.price * (1 - product.discount_percentage / 100);
-                }
+            let priceDisplay = `${itemPrice.toFixed(2)} грн`;
+            if (product.is_on_sale && product.discount_percentage > 0) {
+                priceDisplay = `<span class="original-price">${product.price.toFixed(2)}</span> ${itemPrice.toFixed(2)} грн (-${product.discount_percentage}%)`;
+            }
 
-                const itemTotal = itemPrice * item.quantity;
-                currentTotal += itemTotal;
-
-                let imageUrl = '';
-                if (product.image_url && product.image_url.startsWith('http')) {
-                    imageUrl = product.image_url;
-                } else if (product.image_url) {
-                    imageUrl = UPLOAD_DIR + product.image_url;
-                } else {
-                    imageUrl = 'https://placehold.co/64x64/94a3b8/ffffff?text=X';
-                }
-
-                let priceDisplay = `${itemPrice.toFixed(2)} грн`;
-                if (product.is_on_sale && product.discount_percentage > 0) {
-                    priceDisplay = `<span class="original-price">${product.price.toFixed(2)}</span> ${itemPrice.toFixed(2)} грн (-${product.discount_percentage}%)`;
-                }
-
-                const itemElement = document.createElement('div');
-                // MOBILE ADAPTATION: Елементи кошика - адаптивні
-                itemElement.className = 'cart-item flex flex-col sm:flex-row items-start sm:items-center bg-white p-3 sm:p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200 border border-border-light';
-                itemElement.innerHTML = `
-                    <div class="flex items-center space-x-3 sm:space-x-4 flex-grow w-full sm:w-auto mb-2 sm:mb-0">
-                        <img
-                            src="${imageUrl}"
-                            alt="${product.name}"
-                            class="w-12 h-12 sm:w-16 sm:h-16 object-cover rounded-lg border border-gray-200"
-                            onerror="this.onerror=null; this.src='https://placehold.co/64x64/94a3b8/ffffff?text=X';"
-                            loading="lazy"
-                        >
-                        <div class="flex flex-col min-w-0 flex-grow">
-                            <div class="text-base sm:text-lg font-bold text-gray-800 truncate">${product.name}</div>
-                            <div class="text-xs sm:text-sm text-gray-600">${priceDisplay} / шт</div>
-                        </div>
+            const itemElement = document.createElement('div');
+            itemElement.className = 'cart-item flex flex-col sm:flex-row items-start sm:items-center bg-white p-3 sm:p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200 border border-border-light';
+            itemElement.innerHTML = `
+                <div class="flex items-center space-x-3 sm:space-x-4 flex-grow w-full sm:w-auto mb-2 sm:mb-0">
+                    <img
+                        src="${imageUrl}"
+                        alt="${product.name}"
+                        class="w-12 h-12 sm:w-16 sm:h-16 object-cover rounded-lg border border-gray-200"
+                        onerror="this.onerror=null; this.src='https://placehold.co/64x64/94a3b8/ffffff?text=X';"
+                        loading="lazy"
+                    >
+                    <div class="flex flex-col min-w-0 flex-grow">
+                        <div class="text-base sm:text-lg font-bold text-gray-800 truncate">${product.name}</div>
+                        <div class="text-xs sm:text-sm text-gray-600">${priceDisplay} / шт</div>
                     </div>
-                    <div class="flex items-center justify-between sm:justify-end space-x-3 sm:space-x-4 ml-0 sm:ml-auto w-full sm:w-auto">
-                        <div class="flex items-center border border-gray-300 rounded-lg overflow-hidden">
-                            <button class="quantity-btn minus text-lg sm:text-xl w-7 h-7 sm:w-8 sm:h-8 bg-gray-100 hover:bg-gray-200 transition" data-id="${item.id}">-</button>
-                            <span class="px-2 sm:px-3 font-semibold text-sm sm:text-base">${item.quantity}</span>
-                            <button class="quantity-btn plus text-lg sm:text-xl w-7 h-7 sm:w-8 sm:h-8 bg-gray-100 hover:bg-gray-200 transition" data-id="${item.id}">+</button>
-                        </div>
-                        <div class="text-base sm:text-xl font-bold text-header-dark w-20 sm:w-24 text-right">${itemTotal.toFixed(2)} грн</div>
-                        <button class="remove-btn text-red-500 hover:text-red-700 transition" data-id="${item.id}" aria-label="Видалити">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 sm:h-6 sm:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                        </button>
+                </div>
+                <div class="flex items-center justify-between sm:justify-end space-x-3 sm:space-x-4 ml-0 sm:ml-auto w-full sm:w-auto">
+                    <div class="flex items-center border border-gray-300 rounded-lg overflow-hidden">
+                        <button class="quantity-btn minus text-lg sm:text-xl w-7 h-7 sm:w-8 sm:h-8 bg-gray-100 hover:bg-gray-200 transition" data-id="${item.id}">-</button>
+                        <span class="px-2 sm:px-3 font-semibold text-sm sm:text-base">${item.quantity}</span>
+                        <button class="quantity-btn plus text-lg sm:text-xl w-7 h-7 sm:w-8 sm:h-8 bg-gray-100 hover:bg-gray-200 transition" data-id="${item.id}">+</button>
                     </div>
-                `;
-                cartItemsContainer.appendChild(itemElement);
-            });
-
-            saveCart();
-            updateCartTotal();
-
-            document.querySelectorAll('.quantity-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const id = e.currentTarget.dataset.id;
-                    const change = e.currentTarget.classList.contains('plus') ? 1 : -1;
-                    updateCartQuantity(id, change);
-                });
-            });
-            document.querySelectorAll('.remove-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    removeFromCart(e.currentTarget.dataset.id);
-                });
-            });
+                    <div class="text-base sm:text-xl font-bold text-header-dark w-20 sm:w-24 text-right">${itemTotal.toFixed(2)} грн</div>
+                    <button class="remove-btn text-red-500 hover:text-red-700 transition" data-id="${item.id}" aria-label="Видалити">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 sm:h-6 sm:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+            `;
+            container.appendChild(itemElement);
         }
 
         async function updateCartQuantity(productId, change) {
@@ -1929,15 +1900,15 @@
                     removeFromCart(productId);
                 } else {
                     saveCart();
-                    renderCart();
+                    await renderCart();
                 }
             }
         }
 
-        function removeFromCart(productId) {
+        async function removeFromCart(productId) {
             cart = cart.filter(item => item.id != productId);
             saveCart();
-            renderCart();
+            await renderCart();
         }
 
         async function updateCartTotal() {
@@ -2002,6 +1973,26 @@
             const confirmed = await showConfirm(`Підтвердьте замовлення на суму ${total.toFixed(2)} грн.`);
             if (!confirmed) return;
 
+            // Отримуємо інформацію про всі товари в кошику (включно з прихованими)
+            const orderItems = await Promise.all(cart.map(async (item) => {
+                let product = products.find(p => p.id == item.id);
+                if (!product) {
+                    product = await fetchHiddenProductForCart(item.id);
+                }
+                
+                let itemPrice = product ? product.price : 0;
+                if (product && product.is_on_sale && product.discount_percentage > 0) {
+                    itemPrice = product.price * (1 - product.discount_percentage / 100);
+                }
+                
+                return {
+                    id: item.id,
+                    name: product ? product.name : 'Невідомий товар',
+                    price: itemPrice,
+                    quantity: item.quantity
+                };
+            }));
+
             const orderData = {
                 action: 'place_order',
                 customer: {
@@ -2011,19 +2002,7 @@
                     address: customerAddress,
                     needs_delivery: needsDelivery
                 },
-                items: cart.map(item => {
-                    const product = products.find(p => p.id == item.id);
-                    let itemPrice = product ? product.price : 0;
-                    if (product && product.is_on_sale && product.discount_percentage > 0) {
-                        itemPrice = product.price * (1 - product.discount_percentage / 100);
-                    }
-                    return {
-                        id: item.id, // NEW: Add product ID
-                        name: product ? product.name : 'Невідомий товар',
-                        price: itemPrice,
-                        quantity: item.quantity
-                    };
-                }),
+                items: orderItems,
                 total_amount: total
             };
 
@@ -3068,7 +3047,7 @@
             showFirstVisitMessage(); // Показати повідомлення про перше відвідування
         }
 
-        function handleHashChange() {
+        async function handleHashChange() {
             const currentHash = window.location.hash;
             
             // Перевіряємо активацію прихованої категорії
@@ -3083,18 +3062,18 @@
             
             // Обробка навігації по сторінках
             if (currentHash === ADMIN_SECRET_PATH) {
-                showPage('admin');
+                await showPage('admin');
             } else if (currentHash === '#cart') {
-                showPage('cart');
+                await showPage('cart');
             } else if (currentHash === HIDDEN_CATEGORY_HASH) {
-                showPage('products');
+                await showPage('products');
                 // Автоматично встановлюємо фільтр на приховану категорію
                 if (hiddenCategoryId) {
                     categoryFilter.value = hiddenCategoryId;
                 }
                 fetchProducts();
             } else {
-                showPage('products');
+                await showPage('products');
                 // Очищуємо фільтр якщо виходимо з режиму #alk
                 if (wasHiddenVisible && categoryFilter.value == hiddenCategoryId) {
                     categoryFilter.value = '';
