@@ -732,23 +732,6 @@
             <!-- MOBILE ADAPTATION: Зменшуємо розмір заголовка на мобільних -->
             <h1 class="text-2xl sm:text-3xl font-extrabold text-header-dark mb-6 sm:mb-8 border-b pb-2 sm:pb-3">Каталог
                 товарів</h1>
-            
-            <!-- ТЕСТОВЕ ПОВІДОМЛЕННЯ -->
-            <div id="test-mode-indicator" class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6 rounded-r-lg">
-                <div class="flex">
-                    <div class="flex-shrink-0">
-                        <svg class="h-5 w-5 text-blue-500" viewBox="0 0 20 20" fill="currentColor">
-                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
-                        </svg>
-                    </div>
-                    <div class="ml-3">
-                        <p class="text-sm font-medium">
-                            Демонстраційний режим: Категорія "Алкоголь і куріння" прихована. 
-                            <strong>Додайте <code>#alk</code> до URL</strong> для перегляду прихованих товарів.
-                        </p>
-                    </div>
-                </div>
-            </div>
 
             <!-- Поле пошуку -->
             <div class="mb-6">
@@ -1311,66 +1294,6 @@
         const HIDDEN_CATEGORY_HASH = '#alk';
         let hiddenCategoryId = null;
         let isHiddenCategoryVisible = false;
-        
-        // --- ТЕСТОВІ ДАНІ (ДЛЯ ДЕМОНСТРАЦІЇ) ---
-        const TEST_MODE = true; // Встановити false для використання реального API
-        const testCategories = [
-            { id: 1, name: "Напої" },
-            { id: 2, name: "Закуски" },
-            { id: 3, name: "Алкоголь і куріння" },
-            { id: 4, name: "Солодощі" }
-        ];
-        
-        const testProducts = [
-            {
-                id: 1,
-                name: "Кока-кола",
-                description: "Освіжаючий напій",
-                price: 25.00,
-                image_url: "https://placehold.co/300x300?text=Кока-кола",
-                in_stock: 10,
-                discount_percentage: 0,
-                is_on_sale: false,
-                category_id: 1,
-                created_at: new Date().toISOString()
-            },
-            {
-                id: 2,
-                name: "Пиво Corona",
-                description: "Світле пиво",
-                price: 45.00,
-                image_url: "https://placehold.co/300x300?text=Пиво+Corona",
-                in_stock: 8,
-                discount_percentage: 10,
-                is_on_sale: true,
-                category_id: 3, // Алкоголь і куріння
-                created_at: new Date().toISOString()
-            },
-            {
-                id: 3,
-                name: "Marlboro Gold",
-                description: "Сигарети",
-                price: 85.00,
-                image_url: "https://placehold.co/300x300?text=Marlboro+Gold",
-                in_stock: 5,
-                discount_percentage: 0,
-                is_on_sale: false,
-                category_id: 3, // Алкоголь і куріння
-                created_at: new Date().toISOString()
-            },
-            {
-                id: 4,
-                name: "Чіпси Lays",
-                description: "Картопляні чіпси",
-                price: 20.00,
-                image_url: "https://placehold.co/300x300?text=Чіпси+Lays",
-                in_stock: 15,
-                discount_percentage: 5,
-                is_on_sale: true,
-                category_id: 2,
-                created_at: new Date().toISOString()
-            }
-        ];
 
         // --- DOM ЕЛЕМЕНТИ ---
         const pages = document.querySelectorAll('.page');
@@ -1554,15 +1477,6 @@
 
         async function fetchCategories() {
             try {
-                if (TEST_MODE) {
-                    // Використовуємо тестові дані
-                    categories = testCategories;
-                    const hiddenCategory = categories.find(cat => cat.name === HIDDEN_CATEGORY_NAME);
-                    hiddenCategoryId = hiddenCategory ? hiddenCategory.id : null;
-                    renderCategoryFilter();
-                    return;
-                }
-                
                 const response = await fetch(API_BASE_URL + '?action=get_categories');
                 const data = await response.json();
                 if (data.status === 'success') {
@@ -1602,79 +1516,45 @@
             errorMessage.classList.add('hidden');
 
             try {
-                let productsData;
-                
-                if (TEST_MODE) {
-                    // Використовуємо тестові дані
-                    productsData = [...testProducts];
+                let url = API_BASE_URL + '?action=get_products';
+                const categoryId = categoryFilter.value;
+                const sort = sortFilter.value;
+                const searchTerm = searchInput.value.trim();
+
+                if (categoryId) url += '&category_id=' + encodeURIComponent(categoryId);
+                if (sort) url += '&sort=' + encodeURIComponent(sort);
+                if (searchTerm) url += '&search=' + encodeURIComponent(searchTerm);
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    let productsData = data.data.map(p => ({
+                        ...p,
+                        in_stock: parseInt(p.in_stock),
+                        discount_percentage: parseInt(p.discount_percentage),
+                        is_on_sale: Boolean(p.is_on_sale)
+                    }));
                     
-                    // Фільтрація за категорією
-                    const categoryId = categoryFilter.value;
-                    if (categoryId) {
-                        productsData = productsData.filter(p => p.category_id == categoryId);
+                    // Фільтруємо товари з прихованої категорії якщо не активований режим #alk
+                    if (!isHiddenCategoryVisible && hiddenCategoryId) {
+                        productsData = productsData.filter(p => p.category_id != hiddenCategoryId);
                     }
                     
-                    // Фільтрація за пошуком
-                    const searchTerm = searchInput.value.trim().toLowerCase();
-                    if (searchTerm) {
-                        productsData = productsData.filter(p => 
-                            p.name.toLowerCase().includes(searchTerm) || 
-                            (p.description && p.description.toLowerCase().includes(searchTerm))
-                        );
-                    }
+                    products = productsData;
+                    renderProducts();
+                    renderCart();
                     
-                    // Сортування
-                    const sort = sortFilter.value;
-                    if (sort === 'price_asc') {
-                        productsData.sort((a, b) => a.price - b.price);
-                    } else if (sort === 'price_desc') {
-                        productsData.sort((a, b) => b.price - a.price);
-                    } else if (sort === 'date_asc') {
-                        productsData.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-                    } else if (sort === 'date_desc') {
-                        productsData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                    // Якщо адмін залогінений - оновити адмін-панель
+                    if (isAdminLoggedIn) {
+                        renderAdminProducts();
                     }
                 } else {
-                    let url = API_BASE_URL + '?action=get_products';
-                    const categoryId = categoryFilter.value;
-                    const sort = sortFilter.value;
-                    const searchTerm = searchInput.value.trim();
-
-                    if (categoryId) url += '&category_id=' + encodeURIComponent(categoryId);
-                    if (sort) url += '&sort=' + encodeURIComponent(sort);
-                    if (searchTerm) url += '&search=' + encodeURIComponent(searchTerm);
-
-                    const response = await fetch(url);
-                    const data = await response.json();
-
-                    if (data.status === 'success') {
-                        productsData = data.data.map(p => ({
-                            ...p,
-                            in_stock: parseInt(p.in_stock),
-                            discount_percentage: parseInt(p.discount_percentage),
-                            is_on_sale: Boolean(p.is_on_sale)
-                        }));
-                    } else {
-                        throw new Error(data.message || 'Помилка при отриманні даних з API.');
-                    }
-                }
-                
-                // Фільтруємо товари з прихованої категорії якщо не активований режим #alk
-                if (!isHiddenCategoryVisible && hiddenCategoryId) {
-                    productsData = productsData.filter(p => p.category_id != hiddenCategoryId);
-                }
-                
-                products = productsData;
-                renderProducts();
-                renderCart();
-                
-                // Якщо адмін залогінений - оновити адмін-панель
-                if (isAdminLoggedIn) {
-                    renderAdminProducts();
+                    throw new Error(data.message || 'Помилка при отриманні даних з API.');
                 }
             } catch (error) {
                 console.error("Fetch Error:", error);
-                errorMessage.textContent = `Помилка завантаження даних: ${error.message}. ${TEST_MODE ? 'Використовуються тестові дані.' : 'Переконайтеся, що сервер/MySQL запущені.'}`;
+                errorMessage.textContent = `Помилка завантаження даних: ${error.message}. Переконайтеся, що сервер/MySQL запущені, а URL зображень доступні.`;
                 errorMessage.classList.remove('hidden');
             } finally {
                 loadingIndicator.classList.add('hidden');
@@ -1861,11 +1741,6 @@
 
         async function fetchHiddenProductForCart(productId) {
             try {
-                if (TEST_MODE) {
-                    const product = testProducts.find(p => p.id == productId);
-                    return product ? { ...product } : null;
-                }
-                
                 const response = await fetch(API_BASE_URL + '?action=get_products');
                 const data = await response.json();
                 if (data.status === 'success') {
@@ -2635,24 +2510,15 @@
             
             // Для адмін панелі завантажуємо всі товари, включно з прихованими
             try {
-                let allProducts;
-                
-                if (TEST_MODE) {
-                    allProducts = [...testProducts];
-                } else {
-                    const response = await fetch(API_BASE_URL + '?action=get_products');
-                    const data = await response.json();
-                    if (data.status === 'success') {
-                        allProducts = data.data.map(p => ({
-                            ...p,
-                            in_stock: parseInt(p.in_stock),
-                            discount_percentage: parseInt(p.discount_percentage),
-                            is_on_sale: Boolean(p.is_on_sale)
-                        }));
-                    } else {
-                        throw new Error('Помилка завантаження товарів');
-                    }
-                }
+                const response = await fetch(API_BASE_URL + '?action=get_products');
+                const data = await response.json();
+                if (data.status === 'success') {
+                    const allProducts = data.data.map(p => ({
+                        ...p,
+                        in_stock: parseInt(p.in_stock),
+                        discount_percentage: parseInt(p.discount_percentage),
+                        is_on_sale: Boolean(p.is_on_sale)
+                    }));
                     
                     if (allProducts.length === 0) {
                         adminProductsList.innerHTML = '<p class="text-gray-500">Немає товарів для відображення.</p>';
@@ -2754,6 +2620,8 @@
                             editProduct(id);
                         });
                     });
+                } else {
+                    throw new Error('Помилка завантаження товарів');
                 }
             } catch (error) {
                 console.error('Error fetching all products for admin:', error);
