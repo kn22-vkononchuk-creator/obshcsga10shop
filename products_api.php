@@ -7,10 +7,31 @@ ini_set('log_errors', 1);
 ini_set('error_log', __DIR__ . '/php-error.log');
 error_reporting(E_ALL);
 
-header("Content-Type: application/json"); 
+// --- CORS Headers (додано більше заголовків для кращої сумісності) ---
+header("Content-Type: application/json; charset=utf-8"); 
 header("Access-Control-Allow-Origin: *"); 
-header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type");
+header("Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
+header("Access-Control-Max-Age: 3600");
+
+// Обробка preflight запитів
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
+
+// --- Функція для безпечного виводу JSON ---
+function safe_json_response($data, $http_code = 200) {
+    http_response_code($http_code);
+    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit();
+}
+
+// --- Функція для обробки помилок ---
+function handle_error($message, $http_code = 500) {
+    error_log("API Error: " . $message);
+    safe_json_response(["status" => "error", "message" => $message], $http_code);
+}
 
 // --- Параметри підключення до БД ---
 $servername = "localhost"; 
@@ -27,14 +48,51 @@ define('WEBSITE_BASE_URL', 'https://www.obshchaga10shop.website/'); // <--- Зм
 // --- Підключення до БД ---
 $conn = new mysqli($servername, $username, $password, $dbname);
 if ($conn->connect_error) {
-    http_response_code(500);
-    echo json_encode(["status" => "error", "message" => "Connection failed: " . $conn->connect_error]);
-    exit();
+    handle_error("Connection failed: " . $conn->connect_error, 500);
 }
 $conn->set_charset("utf8mb4");
 
 // --- Глобальна змінна для JSON-даних ---
 $request_data = [];
+
+// --- Перевірка та створення таблиць ---
+function createTablesIfNotExist($conn) {
+    // Створюємо таблицю categories якщо її немає
+    $sql_categories = "CREATE TABLE IF NOT EXISTS `categories` (
+        `id` int(11) NOT NULL AUTO_INCREMENT,
+        `name` varchar(255) NOT NULL UNIQUE,
+        `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (`id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+    
+    if (!$conn->query($sql_categories)) {
+        error_log("Error creating categories table: " . $conn->error);
+    }
+    
+    // Створюємо таблицю products якщо її немає  
+    $sql_products = "CREATE TABLE IF NOT EXISTS `products` (
+        `id` int(11) NOT NULL AUTO_INCREMENT,
+        `name` varchar(255) NOT NULL,
+        `description` text,
+        `price` decimal(10,2) NOT NULL,
+        `image_url` varchar(500),
+        `in_stock` int(11) NOT NULL DEFAULT 0,
+        `discount_percentage` int(11) NOT NULL DEFAULT 0,
+        `is_on_sale` tinyint(1) NOT NULL DEFAULT 0,
+        `category_id` int(11) DEFAULT NULL,
+        `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (`id`),
+        KEY `category_id` (`category_id`),
+        CONSTRAINT `products_ibfk_1` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+    
+    if (!$conn->query($sql_products)) {
+        error_log("Error creating products table: " . $conn->error);
+    }
+}
+
+// Створюємо таблиці якщо потрібно
+createTablesIfNotExist($conn);
 
 // --- Визначення action ---
 $action = '';
@@ -55,16 +113,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             // Логуємо помилку, якщо вхідні дані не є валідним JSON
             error_log("JSON Decode Error: " . json_last_error_msg() . " Input: " . $input);
-            // Можна повернути помилку клієнту, якщо це критично для дії
-            // http_response_code(400);
-            // echo json_encode(["status" => "error", "message" => "Invalid JSON input."]);
-            // exit();
         }
     }
 } elseif ($_SERVER['REQUEST_METHOD'] === 'GET') {
     // Для GET-запитів 'action' завжди в URL
     $action = isset($_GET['action']) ? $_GET['action'] : '';
 }
+
+// Логуємо отриманий action для діагностики
+error_log("API Request: Method=" . $_SERVER['REQUEST_METHOD'] . ", Action=" . $action . ", POST=" . print_r($_POST, true));
 
 // --- Telegram helper functions ---
 /**
@@ -313,13 +370,25 @@ if (isset($_GET['webhook']) && $_GET['webhook'] === 'telegram') {
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     switch ($action) {
         case 'get_categories':
-            $sql = "SELECT id, name FROM categories ORDER BY name ASC";
-            $result = $conn->query($sql);
-            $categories = [];
-            while ($row = $result->fetch_assoc()) {
-                $categories[] = $row;
+            try {
+                $sql = "SELECT id, name FROM categories ORDER BY name ASC";
+                $result = $conn->query($sql);
+                
+                if (!$result) {
+                    handle_error("Помилка запиту категорій: " . $conn->error, 500);
+                }
+                
+                $categories = [];
+                while ($row = $result->fetch_assoc()) {
+                    $categories[] = [
+                        'id' => (int)$row['id'],
+                        'name' => $row['name']
+                    ];
+                }
+                safe_json_response(["status" => "success", "data" => $categories]);
+            } catch (Exception $e) {
+                handle_error("Помилка отримання категорій: " . $e->getMessage(), 500);
             }
-            echo json_encode(["status" => "success", "data" => $categories]);
             break;
 
         case 'get_products':
@@ -410,8 +479,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
             break;
 
         default:
-            http_response_code(400);
-            echo json_encode(["status" => "error", "message" => "Unknown GET action."]);
+            handle_error("Unknown GET action: " . $action, 400);
             break;
     }
     $conn->close();
@@ -436,35 +504,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $hashed_password = $row['password_hash'];
 
                     if (password_verify($password, $hashed_password)) {
-                        echo json_encode(["status" => "success", "authenticated" => true]);
+                        safe_json_response(["status" => "success", "authenticated" => true]);
                     } else {
-                        echo json_encode(["status" => "error", "message" => "Неправильне ім'я користувача або пароль.", "authenticated" => false]);
+                        safe_json_response(["status" => "error", "message" => "Неправильне ім'я користувача або пароль.", "authenticated" => false], 401);
                     }
                 } else {
-                    echo json_encode(["status" => "error", "message" => "Неправильне ім'я користувача або пароль.", "authenticated" => false]);
+                    safe_json_response(["status" => "error", "message" => "Неправильне ім'я користувача або пароль.", "authenticated" => false], 401);
                 }
                 $stmt->close();
             } else {
-                http_response_code(400);
-                echo json_encode(["status" => "error", "message" => "Missing username or password for admin login."]);
+                handle_error("Missing username or password for admin login.", 400);
             }
             break;
 
         case 'add_category':
-            if (isset($_POST['name']) && !empty(trim($_POST['name']))) {
-                $name = $conn->real_escape_string(trim($_POST['name']));
-                $stmt = $conn->prepare("INSERT INTO categories (name) VALUES (?)");
-                $stmt->bind_param("s", $name);
-                if ($stmt->execute()) {
-                    echo json_encode(["status" => "success", "id" => $conn->insert_id]);
-                } else {
-                    http_response_code(500);
-                    echo json_encode(["status" => "error", "message" => "Помилка додавання категорії: " . $stmt->error]);
+            try {
+                if (!isset($_POST['name']) || empty(trim($_POST['name']))) {
+                    handle_error("Ім'я категорії не може бути порожнім.", 400);
                 }
-                $stmt->close();
-            } else {
-                http_response_code(400);
-                echo json_encode(["status" => "error", "message" => "Ім'я категорії не може бути порожнім."]);
+                
+                $name = $conn->real_escape_string(trim($_POST['name']));
+                
+                // Перевіряємо, чи не існує вже така категорія
+                $stmt_check = $conn->prepare("SELECT id FROM categories WHERE name = ?");
+                $stmt_check->bind_param("s", $name);
+                $stmt_check->execute();
+                $result_check = $stmt_check->get_result();
+                
+                if ($result_check->num_rows > 0) {
+                    $stmt_check->close();
+                    handle_error("Категорія з такою назвою вже існує.", 400);
+                }
+                $stmt_check->close();
+                
+                $stmt = $conn->prepare("INSERT INTO categories (name) VALUES (?)");
+                if (!$stmt) {
+                    handle_error("Помилка підготовки запиту: " . $conn->error, 500);
+                }
+                
+                $stmt->bind_param("s", $name);
+                
+                error_log("Attempting to add category: " . $name);
+                
+                if ($stmt->execute()) {
+                    $new_id = $conn->insert_id;
+                    $stmt->close();
+                    error_log("Category added successfully: " . $name . " with ID: " . $new_id);
+                    safe_json_response(["status" => "success", "id" => $new_id, "message" => "Категорію '{$name}' успішно додано!"]);
+                } else {
+                    $error_msg = $stmt->error;
+                    $stmt->close();
+                    error_log("Failed to add category: " . $name . ". Error: " . $error_msg);
+                    handle_error("Помилка додавання категорії: " . $error_msg, 500);
+                }
+            } catch (Exception $e) {
+                handle_error("Помилка додавання категорії: " . $e->getMessage(), 500);
             }
             break;
 
@@ -1206,8 +1300,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             break;
 
         default:
-            http_response_code(400);
-            echo json_encode(["status" => "error", "message" => "Unknown POST action."]);
+            handle_error("Unknown POST action: " . $action, 400);
             break;
     }
     $conn->close();
@@ -1215,7 +1308,5 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Якщо дія не визначена або метод не відповідає
-http_response_code(400);
-echo json_encode(["status" => "error", "message" => "Invalid request method or missing action parameter."]);
-$conn->close();
+handle_error("Invalid request method (" . $_SERVER['REQUEST_METHOD'] . ") or missing action parameter (action: " . $action . ")", 400);
 ?>
