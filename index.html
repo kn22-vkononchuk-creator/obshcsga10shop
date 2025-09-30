@@ -1542,12 +1542,13 @@
                     }
                     
                     products = productsData;
+                    clearProductsCache(); // Очищуємо кеш при оновленні
                     renderProducts();
-                    renderCart();
+                    await renderCart();
                     
                     // Якщо адмін залогінений - оновити адмін-панель
                     if (isAdminLoggedIn) {
-                        renderAdminProducts();
+                        await renderAdminProducts();
                     }
                 } else {
                     throw new Error(data.message || 'Помилка при отриманні даних з API.');
@@ -1710,10 +1711,7 @@
             // Отримуємо всі товари для кошика (включно з прихованими)
             const cartProducts = await Promise.all(
                 cart.map(async (item) => {
-                    let product = products.find(p => p.id == item.id);
-                    if (!product) {
-                        product = await fetchHiddenProductForCart(item.id);
-                    }
+                    const product = await getProductById(item.id);
                     return { item, product };
                 })
             );
@@ -1762,6 +1760,34 @@
                 console.error('Error fetching hidden product for cart:', error);
             }
             return null;
+        }
+
+        // Глобальний кеш для прихованих товарів
+        let hiddenProductsCache = new Map();
+
+        async function getProductById(productId) {
+            // Спочатку шукаємо в поточному списку
+            let product = products.find(p => p.id == productId);
+            if (product) {
+                return product;
+            }
+
+            // Перевіряємо кеш
+            if (hiddenProductsCache.has(productId)) {
+                return hiddenProductsCache.get(productId);
+            }
+
+            // Отримуємо з API та кешуємо
+            product = await fetchHiddenProductForCart(productId);
+            if (product) {
+                hiddenProductsCache.set(productId, product);
+            }
+            return product;
+        }
+
+        // Очищуємо кеш при оновленні товарів
+        function clearProductsCache() {
+            hiddenProductsCache.clear();
         }
 
         function renderCartItem(item, product, container) {
@@ -1880,11 +1906,7 @@
         async function updateCartQuantity(productId, change) {
             const item = cart.find(i => i.id == productId);
             if (item) {
-                // Шукаємо товар у поточному списку або робимо API запит для прихованих товарів
-                let product = products.find(p => p.id == productId);
-                if (!product) {
-                    product = await fetchHiddenProductForCart(productId);
-                }
+                const product = await getProductById(productId);
                 
                 if (!product) {
                     showAlert('Товар не знайдено.');
@@ -1916,12 +1938,7 @@
             
             // Використовуємо Promise.all для паралельної обробки всіх товарів
             const itemTotals = await Promise.all(cart.map(async (item) => {
-                let product = products.find(p => p.id == item.id);
-                
-                // Якщо товар не знайдено в поточному списку, шукаємо серед прихованих
-                if (!product) {
-                    product = await fetchHiddenProductForCart(item.id);
-                }
+                const product = await getProductById(item.id);
                 
                 if (!product) return 0;
 
@@ -1975,10 +1992,7 @@
 
             // Отримуємо інформацію про всі товари в кошику (включно з прихованими)
             const orderItems = await Promise.all(cart.map(async (item) => {
-                let product = products.find(p => p.id == item.id);
-                if (!product) {
-                    product = await fetchHiddenProductForCart(item.id);
-                }
+                const product = await getProductById(item.id);
                 
                 let itemPrice = product ? product.price : 0;
                 if (product && product.is_on_sale && product.discount_percentage > 0) {
@@ -2021,9 +2035,9 @@
                     showAlert("✅ Замовлення успішно оформлено! Ми зв'яжемося з вами найближчим часом.");
                     cart = [];
                     saveCart();
-                    renderCart();
+                    await renderCart();
                     customerInfoForm.reset();
-                    showPage('products');
+                    await showPage('products');
                 } else {
                     throw new Error(result.message || 'Помилка при оформленні замовлення.');
                 }
@@ -2214,6 +2228,7 @@
                             showAlert(`Категорію "${name}" успішно видалено.`);
                             await fetchAdminCategories();
                             await fetchCategories();
+                            await fetchProducts(); // Оновлюємо товари також
                         } else {
                             throw new Error(result.message || 'Помилка видалення категорії.');
                         }
@@ -2273,6 +2288,7 @@
                     categoryNameInput.value = '';
                     await fetchAdminCategories();
                     await fetchCategories();
+                    await fetchProducts(); // Оновлюємо товари також
                 } else {
                     throw new Error(result.message || 'Помилка додавання категорії.');
                 }
@@ -2312,6 +2328,7 @@
                     editCategoryModal.classList.remove('dialog-show');
                     await fetchAdminCategories();
                     await fetchCategories();
+                    await fetchProducts(); // Оновлюємо товари також
                 } else {
                     throw new Error(result.message || 'Помилка оновлення категорії.');
                 }
@@ -2385,7 +2402,7 @@
                     document.getElementById('add-product-form').reset();
                     await fetchProducts(); // Оновлюємо список товарів
                     if (isAdminLoggedIn) {
-                        renderAdminProducts(); // Перерендеримо адмін-панель
+                        await renderAdminProducts(); // Перерендеримо адмін-панель
                     }
                 } else {
                     throw new Error(result.message || 'Помилка сервера при додаванні.');
@@ -2421,7 +2438,10 @@
                     cart = cart.filter(item => item.id != productId);
                     saveCart();
 
-                    fetchProducts();
+                    await fetchProducts();
+                    if (isAdminLoggedIn) {
+                        await renderAdminProducts();
+                    }
                 } else {
                     throw new Error(result.message || 'Помилка сервера при видаленні.');
                 }
@@ -2445,7 +2465,10 @@
                 const result = await response.json();
 
                 if (result.status === 'success') {
-                    fetchProducts();
+                    await fetchProducts();
+                    if (isAdminLoggedIn) {
+                        await renderAdminProducts();
+                    }
                 } else {
                     throw new Error(result.message || 'Помилка сервера при оновленні наявності.');
                 }
@@ -2579,7 +2602,8 @@
                                 }
                             } else {
                                 showAlert('Будь ласка, введіть коректне число для наявності (>= 0).');
-                                e.currentTarget.value = allProducts.find(p => p.id == id).in_stock;
+                                const product = allProducts.find(p => p.id == id);
+                                e.currentTarget.value = product ? product.in_stock : 0;
                             }
                         });
                     });
@@ -2610,7 +2634,8 @@
 
         // --- ФУНКЦІОНАЛ РЕДАГУВАННЯ ТОВАРУ ---
         async function editProduct(productId) {
-            const product = products.find(p => p.id == productId);
+            const product = await getProductById(productId);
+            
             if (!product) {
                 showAlert('Товар не знайдено для редагування.');
                 return;
@@ -2699,7 +2724,10 @@
                 if (result.status === 'success') {
                     showAlert('Товар успішно оновлено!');
                     editProductModal.classList.remove('dialog-show');
-                    fetchProducts();
+                    await fetchProducts();
+                    if (isAdminLoggedIn) {
+                        await renderAdminProducts();
+                    }
                 } else {
                     throw new Error(result.message || 'Помилка сервера при оновленні.');
                 }
@@ -2820,7 +2848,7 @@
                     csvFileInput.value = ''; // Очистити поле файлу
                     await fetchProducts(); // Оновити список товарів
                     if (isAdminLoggedIn) {
-                        renderAdminProducts(); // Перерендеримо адмін-панель
+                        await renderAdminProducts(); // Перерендеримо адмін-панель
                     }
                 } else if (result.status === 'warning') {
                     importCsvError.textContent = `Імпорт завершено з попередженнями: ${result.message}`;
@@ -2828,7 +2856,7 @@
                     csvFileInput.value = '';
                     await fetchProducts();
                     if (isAdminLoggedIn) {
-                        renderAdminProducts(); // Перерендеримо адмін-панель
+                        await renderAdminProducts(); // Перерендеримо адмін-панель
                     }
                 }
                 else {
@@ -3008,8 +3036,11 @@
 
                 if (result.status === 'success') {
                     showAlert(`Статус замовлення №${orderId} успішно оновлено на "${newStatus}".`);
-                    fetchOrders(); // Оновити список замовлень
-                    fetchProducts(); // Оновити список товарів, якщо були зміни наявності
+                    await fetchOrders(); // Оновити список замовлень
+                    await fetchProducts(); // Оновити список товарів, якщо були зміни наявності
+                    if (isAdminLoggedIn) {
+                        await renderAdminProducts(); // Оновити адмін-панель
+                    }
                 } else {
                     throw new Error(result.message || 'Помилка оновлення статусу замовлення.');
                 }
