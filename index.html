@@ -677,6 +677,26 @@
             transform: translateY(2px);
             box-shadow: 0 1px 0;
         }
+
+        /* Стилі для індикатора прихованої категорії */
+        #hidden-category-indicator {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Стилі для товарів з прихованої категорії в адмін панелі */
+        .admin-product-item.hidden-product {
+            border-left: 4px solid #f59e0b;
+        }
+
+        .admin-product-item.hidden-product .name::after {
+            content: ' 🔒';
+            color: #f59e0b;
+        }
     </style>
 </head>
 
@@ -712,6 +732,23 @@
             <!-- MOBILE ADAPTATION: Зменшуємо розмір заголовка на мобільних -->
             <h1 class="text-2xl sm:text-3xl font-extrabold text-header-dark mb-6 sm:mb-8 border-b pb-2 sm:pb-3">Каталог
                 товарів</h1>
+            
+            <!-- ТЕСТОВЕ ПОВІДОМЛЕННЯ -->
+            <div id="test-mode-indicator" class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6 rounded-r-lg">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <svg class="h-5 w-5 text-blue-500" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+                        </svg>
+                    </div>
+                    <div class="ml-3">
+                        <p class="text-sm font-medium">
+                            Демонстраційний режим: Категорія "Алкоголь і куріння" прихована. 
+                            <strong>Додайте <code>#alk</code> до URL</strong> для перегляду прихованих товарів.
+                        </p>
+                    </div>
+                </div>
+            </div>
 
             <!-- Поле пошуку -->
             <div class="mb-6">
@@ -1268,6 +1305,72 @@
         let cart = JSON.parse(localStorage.getItem('cart')) || [];
         let isAdminLoggedIn = false;
         const DELIVERY_COST = 50.00;
+        
+        // --- КОНСТАНТИ ДЛЯ ПРИХОВАНОЇ КАТЕГОРІЇ ---
+        const HIDDEN_CATEGORY_NAME = 'Алкоголь і куріння';
+        const HIDDEN_CATEGORY_HASH = '#alk';
+        let hiddenCategoryId = null;
+        let isHiddenCategoryVisible = false;
+        
+        // --- ТЕСТОВІ ДАНІ (ДЛЯ ДЕМОНСТРАЦІЇ) ---
+        const TEST_MODE = true; // Встановити false для використання реального API
+        const testCategories = [
+            { id: 1, name: "Напої" },
+            { id: 2, name: "Закуски" },
+            { id: 3, name: "Алкоголь і куріння" },
+            { id: 4, name: "Солодощі" }
+        ];
+        
+        const testProducts = [
+            {
+                id: 1,
+                name: "Кока-кола",
+                description: "Освіжаючий напій",
+                price: 25.00,
+                image_url: "https://placehold.co/300x300?text=Кока-кола",
+                in_stock: 10,
+                discount_percentage: 0,
+                is_on_sale: false,
+                category_id: 1,
+                created_at: new Date().toISOString()
+            },
+            {
+                id: 2,
+                name: "Пиво Corona",
+                description: "Світле пиво",
+                price: 45.00,
+                image_url: "https://placehold.co/300x300?text=Пиво+Corona",
+                in_stock: 8,
+                discount_percentage: 10,
+                is_on_sale: true,
+                category_id: 3, // Алкоголь і куріння
+                created_at: new Date().toISOString()
+            },
+            {
+                id: 3,
+                name: "Marlboro Gold",
+                description: "Сигарети",
+                price: 85.00,
+                image_url: "https://placehold.co/300x300?text=Marlboro+Gold",
+                in_stock: 5,
+                discount_percentage: 0,
+                is_on_sale: false,
+                category_id: 3, // Алкоголь і куріння
+                created_at: new Date().toISOString()
+            },
+            {
+                id: 4,
+                name: "Чіпси Lays",
+                description: "Картопляні чіпси",
+                price: 20.00,
+                image_url: "https://placehold.co/300x300?text=Чіпси+Lays",
+                in_stock: 15,
+                discount_percentage: 5,
+                is_on_sale: true,
+                category_id: 2,
+                created_at: new Date().toISOString()
+            }
+        ];
 
         // --- DOM ЕЛЕМЕНТИ ---
         const pages = document.querySelectorAll('.page');
@@ -1451,17 +1554,25 @@
 
         async function fetchCategories() {
             try {
+                if (TEST_MODE) {
+                    // Використовуємо тестові дані
+                    categories = testCategories;
+                    const hiddenCategory = categories.find(cat => cat.name === HIDDEN_CATEGORY_NAME);
+                    hiddenCategoryId = hiddenCategory ? hiddenCategory.id : null;
+                    renderCategoryFilter();
+                    return;
+                }
+                
                 const response = await fetch(API_BASE_URL + '?action=get_categories');
                 const data = await response.json();
                 if (data.status === 'success') {
                     categories = data.data;
-                    categoryFilter.innerHTML = '<option value="">Всі категорії</option>';
-                    categories.forEach(cat => {
-                        const option = document.createElement('option');
-                        option.value = cat.id;
-                        option.textContent = cat.name;
-                        categoryFilter.appendChild(option);
-                    });
+                    
+                    // Знаходимо ID прихованої категорії
+                    const hiddenCategory = categories.find(cat => cat.name === HIDDEN_CATEGORY_NAME);
+                    hiddenCategoryId = hiddenCategory ? hiddenCategory.id : null;
+                    
+                    renderCategoryFilter();
                 } else {
                     console.error('Помилка завантаження категорій:', data.message);
                 }
@@ -1470,44 +1581,100 @@
             }
         }
 
+        function renderCategoryFilter() {
+            categoryFilter.innerHTML = '<option value="">Всі категорії</option>';
+            categories.forEach(cat => {
+                // Приховуємо спеціальну категорію якщо не активований режим #alk
+                if (cat.id == hiddenCategoryId && !isHiddenCategoryVisible) {
+                    return;
+                }
+                
+                const option = document.createElement('option');
+                option.value = cat.id;
+                option.textContent = cat.name;
+                categoryFilter.appendChild(option);
+            });
+        }
+
         async function fetchProducts() {
             productsContainer.innerHTML = '';
             loadingIndicator.classList.remove('hidden');
             errorMessage.classList.add('hidden');
 
             try {
-                let url = API_BASE_URL + '?action=get_products';
-                const categoryId = categoryFilter.value;
-                const sort = sortFilter.value;
-                const searchTerm = searchInput.value.trim(); // Отримуємо значення пошуку
-
-                if (categoryId) url += '&category_id=' + encodeURIComponent(categoryId);
-                if (sort) url += '&sort=' + encodeURIComponent(sort);
-                if (searchTerm) url += '&search=' + encodeURIComponent(searchTerm); // Додаємо параметр пошуку
-
-                const response = await fetch(url);
-                const data = await response.json();
-
-                if (data.status === 'success') {
-                    products = data.data.map(p => ({
-                        ...p,
-                        in_stock: parseInt(p.in_stock),
-                        discount_percentage: parseInt(p.discount_percentage),
-                        is_on_sale: Boolean(p.is_on_sale)
-                    }));
-                    renderProducts();
-                    renderCart();
+                let productsData;
+                
+                if (TEST_MODE) {
+                    // Використовуємо тестові дані
+                    productsData = [...testProducts];
                     
-                    // Якщо адмін залогінений - оновити адмін-панель
-                    if (isAdminLoggedIn) {
-                        renderAdminProducts();
+                    // Фільтрація за категорією
+                    const categoryId = categoryFilter.value;
+                    if (categoryId) {
+                        productsData = productsData.filter(p => p.category_id == categoryId);
+                    }
+                    
+                    // Фільтрація за пошуком
+                    const searchTerm = searchInput.value.trim().toLowerCase();
+                    if (searchTerm) {
+                        productsData = productsData.filter(p => 
+                            p.name.toLowerCase().includes(searchTerm) || 
+                            (p.description && p.description.toLowerCase().includes(searchTerm))
+                        );
+                    }
+                    
+                    // Сортування
+                    const sort = sortFilter.value;
+                    if (sort === 'price_asc') {
+                        productsData.sort((a, b) => a.price - b.price);
+                    } else if (sort === 'price_desc') {
+                        productsData.sort((a, b) => b.price - a.price);
+                    } else if (sort === 'date_asc') {
+                        productsData.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                    } else if (sort === 'date_desc') {
+                        productsData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
                     }
                 } else {
-                    throw new Error(data.message || 'Помилка при отриманні даних з API.');
+                    let url = API_BASE_URL + '?action=get_products';
+                    const categoryId = categoryFilter.value;
+                    const sort = sortFilter.value;
+                    const searchTerm = searchInput.value.trim();
+
+                    if (categoryId) url += '&category_id=' + encodeURIComponent(categoryId);
+                    if (sort) url += '&sort=' + encodeURIComponent(sort);
+                    if (searchTerm) url += '&search=' + encodeURIComponent(searchTerm);
+
+                    const response = await fetch(url);
+                    const data = await response.json();
+
+                    if (data.status === 'success') {
+                        productsData = data.data.map(p => ({
+                            ...p,
+                            in_stock: parseInt(p.in_stock),
+                            discount_percentage: parseInt(p.discount_percentage),
+                            is_on_sale: Boolean(p.is_on_sale)
+                        }));
+                    } else {
+                        throw new Error(data.message || 'Помилка при отриманні даних з API.');
+                    }
+                }
+                
+                // Фільтруємо товари з прихованої категорії якщо не активований режим #alk
+                if (!isHiddenCategoryVisible && hiddenCategoryId) {
+                    productsData = productsData.filter(p => p.category_id != hiddenCategoryId);
+                }
+                
+                products = productsData;
+                renderProducts();
+                renderCart();
+                
+                // Якщо адмін залогінений - оновити адмін-панель
+                if (isAdminLoggedIn) {
+                    renderAdminProducts();
                 }
             } catch (error) {
                 console.error("Fetch Error:", error);
-                errorMessage.textContent = `Помилка завантаження даних: ${error.message}. Переконайтеся, що сервер/MySQL запущені, а URL зображень доступні.`;
+                errorMessage.textContent = `Помилка завантаження даних: ${error.message}. ${TEST_MODE ? 'Використовуються тестові дані.' : 'Переконайтеся, що сервер/MySQL запущені.'}`;
                 errorMessage.classList.remove('hidden');
             } finally {
                 loadingIndicator.classList.add('hidden');
@@ -1658,6 +1825,133 @@
             }
 
             cart.forEach(item => {
+                // Спочатку шукаємо товар у поточному списку products
+                let product = products.find(p => p.id == item.id);
+                
+                // Якщо товар не знайдений і це може бути товар з прихованої категорії,
+                // робимо окремий API запит для отримання цього товару
+                if (!product) {
+                    fetchHiddenProductForCart(item.id).then(hiddenProduct => {
+                        if (hiddenProduct) {
+                            renderCartItem(item, hiddenProduct, cartItemsContainer);
+                        }
+                    });
+                    return;
+                }
+                
+                renderCartItem(item, product, cartItemsContainer);
+            });
+
+            saveCart();
+            updateCartTotal();
+
+            document.querySelectorAll('.quantity-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const id = e.currentTarget.dataset.id;
+                    const change = e.currentTarget.classList.contains('plus') ? 1 : -1;
+                    updateCartQuantity(id, change);
+                });
+            });
+            document.querySelectorAll('.remove-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    removeFromCart(e.currentTarget.dataset.id);
+                });
+            });
+        }
+
+        async function fetchHiddenProductForCart(productId) {
+            try {
+                if (TEST_MODE) {
+                    const product = testProducts.find(p => p.id == productId);
+                    return product ? { ...product } : null;
+                }
+                
+                const response = await fetch(API_BASE_URL + '?action=get_products');
+                const data = await response.json();
+                if (data.status === 'success') {
+                    const product = data.data.find(p => p.id == productId);
+                    if (product) {
+                        return {
+                            ...product,
+                            in_stock: parseInt(product.in_stock),
+                            discount_percentage: parseInt(product.discount_percentage),
+                            is_on_sale: Boolean(product.is_on_sale)
+                        };
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching hidden product for cart:', error);
+            }
+            return null;
+        }
+
+        function renderCartItem(item, product, container) {
+            let itemPrice = product.price;
+            if (product.is_on_sale && product.discount_percentage > 0) {
+                itemPrice = product.price * (1 - product.discount_percentage / 100);
+            }
+
+            const itemTotal = itemPrice * item.quantity;
+
+            let imageUrl = '';
+            if (product.image_url && product.image_url.startsWith('http')) {
+                imageUrl = product.image_url;
+            } else if (product.image_url) {
+                imageUrl = UPLOAD_DIR + product.image_url;
+            } else {
+                imageUrl = 'https://placehold.co/64x64/94a3b8/ffffff?text=X';
+            }
+
+            let priceDisplay = `${itemPrice.toFixed(2)} грн`;
+            if (product.is_on_sale && product.discount_percentage > 0) {
+                priceDisplay = `<span class="original-price">${product.price.toFixed(2)}</span> ${itemPrice.toFixed(2)} грн (-${product.discount_percentage}%)`;
+            }
+
+            const itemElement = document.createElement('div');
+            // MOBILE ADAPTATION: Елементи кошика - адаптивні
+            itemElement.className = 'cart-item flex flex-col sm:flex-row items-start sm:items-center bg-white p-3 sm:p-4 rounded-xl shadow-sm hover:shadow-md transition duration-200 border border-border-light';
+            itemElement.innerHTML = `
+                <div class="flex items-center space-x-3 sm:space-x-4 flex-grow w-full sm:w-auto mb-2 sm:mb-0">
+                    <img
+                        src="${imageUrl}"
+                        alt="${product.name}"
+                        class="w-12 h-12 sm:w-16 sm:h-16 object-cover rounded-lg border border-gray-200"
+                        onerror="this.onerror=null; this.src='https://placehold.co/64x64/94a3b8/ffffff?text=X';"
+                        loading="lazy"
+                    >
+                    <div class="flex flex-col min-w-0 flex-grow">
+                        <div class="text-base sm:text-lg font-bold text-gray-800 truncate">${product.name}</div>
+                        <div class="text-xs sm:text-sm text-gray-600">${priceDisplay} / шт</div>
+                    </div>
+                </div>
+                <div class="flex items-center justify-between sm:justify-end space-x-3 sm:space-x-4 ml-0 sm:ml-auto w-full sm:w-auto">
+                    <div class="flex items-center border border-gray-300 rounded-lg overflow-hidden">
+                        <button class="quantity-btn minus text-lg sm:text-xl w-7 h-7 sm:w-8 sm:h-8 bg-gray-100 hover:bg-gray-200 transition" data-id="${item.id}">-</button>
+                        <span class="px-2 sm:px-3 font-semibold text-sm sm:text-base">${item.quantity}</span>
+                        <button class="quantity-btn plus text-lg sm:text-xl w-7 h-7 sm:w-8 sm:h-8 bg-gray-100 hover:bg-gray-200 transition" data-id="${item.id}">+</button>
+                    </div>
+                    <div class="text-base sm:text-xl font-bold text-header-dark w-20 sm:w-24 text-right">${itemTotal.toFixed(2)} грн</div>
+                    <button class="remove-btn text-red-500 hover:text-red-700 transition" data-id="${item.id}" aria-label="Видалити">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 sm:h-6 sm:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+            `;
+            container.appendChild(itemElement);
+        }
+
+        // Оновлена версія для роботи з прихованими товарами
+        function renderCartOld() {
+            const cartItemsContainer = document.getElementById('cart-items');
+            cartItemsContainer.innerHTML = '';
+            let currentTotal = 0;
+
+            if (cart.length === 0) {
+                cartItemsContainer.innerHTML = '<p class="text-gray-500 text-lg p-4 bg-gray-50 rounded-lg">Кошик порожній. Додайте щось із каталогу!</p>';
+            }
+
+            cart.forEach(item => {
                 const product = products.find(p => p.id == item.id);
 
                 if (!product) {
@@ -1737,10 +2031,20 @@
             });
         }
 
-        function updateCartQuantity(productId, change) {
+        async function updateCartQuantity(productId, change) {
             const item = cart.find(i => i.id == productId);
             if (item) {
-                const product = products.find(p => p.id == productId);
+                // Шукаємо товар у поточному списку або робимо API запит для прихованих товарів
+                let product = products.find(p => p.id == productId);
+                if (!product) {
+                    product = await fetchHiddenProductForCart(productId);
+                }
+                
+                if (!product) {
+                    showAlert('Товар не знайдено.');
+                    return;
+                }
+                
                 if (change > 0 && item.quantity >= product.in_stock) {
                     showAlert(`Ви не можете додати більше ${product.in_stock} шт. товару "${product.name}".`);
                     return;
@@ -1761,17 +2065,28 @@
             renderCart();
         }
 
-        function updateCartTotal() {
-            let total = cart.reduce((sum, item) => {
-                const product = products.find(p => p.id == item.id);
-                if (!product) return sum;
+        async function updateCartTotal() {
+            let total = 0;
+            
+            // Використовуємо Promise.all для паралельної обробки всіх товарів
+            const itemTotals = await Promise.all(cart.map(async (item) => {
+                let product = products.find(p => p.id == item.id);
+                
+                // Якщо товар не знайдено в поточному списку, шукаємо серед прихованих
+                if (!product) {
+                    product = await fetchHiddenProductForCart(item.id);
+                }
+                
+                if (!product) return 0;
 
                 let itemPrice = product.price;
                 if (product.is_on_sale && product.discount_percentage > 0) {
                     itemPrice = product.price * (1 - product.discount_percentage / 100);
                 }
-                return sum + (itemPrice * item.quantity);
-            }, 0);
+                return itemPrice * item.quantity;
+            }));
+            
+            total = itemTotals.reduce((sum, itemTotal) => sum + itemTotal, 0);
 
             if (needsDeliveryCheckbox.checked) {
                 total += DELIVERY_COST;
@@ -1980,6 +2295,11 @@
                 const data = await response.json();
                 if (data.status === 'success') {
                     categories = data.data;
+                    
+                    // Знаходимо ID прихованої категорії для адмін панелі
+                    const hiddenCategory = categories.find(cat => cat.name === HIDDEN_CATEGORY_NAME);
+                    hiddenCategoryId = hiddenCategory ? hiddenCategory.id : null;
+                    
                     renderAdminCategories(); // Рендеримо категорії в адмін-панелі
                     updateCategorySelects(); // Оновлюємо випадаючі списки категорій
                 } else {
@@ -2310,14 +2630,36 @@
             }
         }
 
-        function renderAdminProducts() {
+        async function renderAdminProducts() {
             adminProductsList.innerHTML = '';
-            if (products.length === 0) {
-                adminProductsList.innerHTML = '<p class="text-gray-500">Немає товарів для відображення.</p>';
-                return;
-            }
+            
+            // Для адмін панелі завантажуємо всі товари, включно з прихованими
+            try {
+                let allProducts;
+                
+                if (TEST_MODE) {
+                    allProducts = [...testProducts];
+                } else {
+                    const response = await fetch(API_BASE_URL + '?action=get_products');
+                    const data = await response.json();
+                    if (data.status === 'success') {
+                        allProducts = data.data.map(p => ({
+                            ...p,
+                            in_stock: parseInt(p.in_stock),
+                            discount_percentage: parseInt(p.discount_percentage),
+                            is_on_sale: Boolean(p.is_on_sale)
+                        }));
+                    } else {
+                        throw new Error('Помилка завантаження товарів');
+                    }
+                }
+                    
+                    if (allProducts.length === 0) {
+                        adminProductsList.innerHTML = '<p class="text-gray-500">Немає товарів для відображення.</p>';
+                        return;
+                    }
 
-            products.forEach(product => {
+                    allProducts.forEach(product => {
                 let imageUrl = '';
                 if (product.image_url && product.image_url.startsWith('http')) {
                     imageUrl = product.image_url;
@@ -2333,81 +2675,90 @@
                     priceDisplay = `<span class="original-price">${product.price.toFixed(2)}</span> ${discountedPrice.toFixed(2)} грн (-${product.discount_percentage}%)`;
                 }
 
-                const categoryName = product.category_id ? (categories.find(c => c.id == product.category_id)?.name || 'Невідома') : 'Без категорії';
+                        const categoryName = product.category_id ? (categories.find(c => c.id == product.category_id)?.name || 'Невідома') : 'Без категорії';
 
-                const item = document.createElement('div');
-                item.className = 'admin-product-item';
-                item.innerHTML = `
-                    <img
-                        src="${imageUrl}"
-                        alt="Preview"
-                        class="w-12 h-12 object-cover rounded-md border border-gray-200"
-                        onerror="this.onerror=null; this.src='https://placehold.co/48x48/94a3b8/ffffff?text=X';"
-                        loading="lazy"
-                    >
-                    <div class="product-details">
-                        <div class="name">${product.name}</div>
-                        ${product.description ? `<div class="text-xs text-gray-500 truncate w-32 sm:w-64">${product.description}</div>` : ''}
-                        <div class="price">${priceDisplay}</div>
-                        <div class="text-xs text-gray-500">Категорія: ${categoryName}</div>
-                        <div class="id">ID: ${product.id}</div>
-                    </div>
-                    <div class="controls">
-                        <input type="number" class="product-stock-input" data-id="${product.id}" value="${product.in_stock}" min="0">
-                        <button data-id="${product.id}" data-name="${product.name}" data-stock="${product.in_stock}" class="notify-btn">
-                            Сповістити
-                        </button>
-                        <button data-id="${product.id}" class="edit-btn">
-                            Редагувати
-                        </button>
-                        <button data-id="${product.id}" data-name="${product.name}" class="delete-admin-btn">
-                            Видалити
-                        </button>
-                    </div>
-                `;
-                adminProductsList.appendChild(item);
-            });
+                        // Додаємо індикатор для товарів з прихованої категорії
+                        const isHiddenProduct = product.category_id == hiddenCategoryId;
+                        const hiddenIndicator = isHiddenProduct ? ' 🔒' : '';
 
-            document.querySelectorAll('.delete-admin-btn').forEach(button => {
-                button.addEventListener('click', (e) => {
-                    const id = e.currentTarget.dataset.id;
-                    const name = e.currentTarget.dataset.name;
-                    deleteProduct(id, name);
-                });
-            });
+                        const item = document.createElement('div');
+                        item.className = 'admin-product-item' + (isHiddenProduct ? ' bg-yellow-50 border-yellow-200' : '');
+                        item.innerHTML = `
+                            <img
+                                src="${imageUrl}"
+                                alt="Preview"
+                                class="w-12 h-12 object-cover rounded-md border border-gray-200"
+                                onerror="this.onerror=null; this.src='https://placehold.co/48x48/94a3b8/ffffff?text=X';"
+                                loading="lazy"
+                            >
+                            <div class="product-details">
+                                <div class="name">${product.name}${hiddenIndicator}</div>
+                                ${product.description ? `<div class="text-xs text-gray-500 truncate w-32 sm:w-64">${product.description}</div>` : ''}
+                                <div class="price">${priceDisplay}</div>
+                                <div class="text-xs text-gray-500">Категорія: ${categoryName}</div>
+                                <div class="id">ID: ${product.id}</div>
+                            </div>
+                            <div class="controls">
+                                <input type="number" class="product-stock-input" data-id="${product.id}" value="${product.in_stock}" min="0">
+                                <button data-id="${product.id}" data-name="${product.name}" data-stock="${product.in_stock}" class="notify-btn">
+                                    Сповістити
+                                </button>
+                                <button data-id="${product.id}" class="edit-btn">
+                                    Редагувати
+                                </button>
+                                <button data-id="${product.id}" data-name="${product.name}" class="delete-admin-btn">
+                                    Видалити
+                                </button>
+                            </div>
+                        `;
+                        adminProductsList.appendChild(item);
+                    });
 
-            document.querySelectorAll('.product-stock-input').forEach(input => {
-                input.addEventListener('change', (e) => {
-                    const id = e.currentTarget.dataset.id;
-                    const newStock = parseInt(e.currentTarget.value);
-                    if (!isNaN(newStock) && newStock >= 0) {
-                        updateProductStock(id, newStock);
-                        const notifyButton = e.currentTarget.closest('.admin-product-item').querySelector('.notify-btn');
-                        if (notifyButton) {
-                            notifyButton.dataset.stock = newStock;
-                        }
-                    } else {
-                        showAlert('Будь ласка, введіть коректне число для наявності (>= 0).');
-                        e.currentTarget.value = products.find(p => p.id == id).in_stock;
-                    }
-                });
-            });
+                    document.querySelectorAll('.delete-admin-btn').forEach(button => {
+                        button.addEventListener('click', (e) => {
+                            const id = e.currentTarget.dataset.id;
+                            const name = e.currentTarget.dataset.name;
+                            deleteProduct(id, name);
+                        });
+                    });
 
-            document.querySelectorAll('.notify-btn').forEach(button => {
-                button.addEventListener('click', (e) => {
-                    const id = e.currentTarget.dataset.id;
-                    const name = e.currentTarget.dataset.name;
-                    const stock = e.currentTarget.dataset.stock;
-                    notifyCustomers(id, name, stock);
-                });
-            });
+                    document.querySelectorAll('.product-stock-input').forEach(input => {
+                        input.addEventListener('change', (e) => {
+                            const id = e.currentTarget.dataset.id;
+                            const newStock = parseInt(e.currentTarget.value);
+                            if (!isNaN(newStock) && newStock >= 0) {
+                                updateProductStock(id, newStock);
+                                const notifyButton = e.currentTarget.closest('.admin-product-item').querySelector('.notify-btn');
+                                if (notifyButton) {
+                                    notifyButton.dataset.stock = newStock;
+                                }
+                            } else {
+                                showAlert('Будь ласка, введіть коректне число для наявності (>= 0).');
+                                e.currentTarget.value = allProducts.find(p => p.id == id).in_stock;
+                            }
+                        });
+                    });
 
-            document.querySelectorAll('.edit-btn').forEach(button => {
-                button.addEventListener('click', (e) => {
-                    const id = e.currentTarget.dataset.id;
-                    editProduct(id);
-                });
-            });
+                    document.querySelectorAll('.notify-btn').forEach(button => {
+                        button.addEventListener('click', (e) => {
+                            const id = e.currentTarget.dataset.id;
+                            const name = e.currentTarget.dataset.name;
+                            const stock = e.currentTarget.dataset.stock;
+                            notifyCustomers(id, name, stock);
+                        });
+                    });
+
+                    document.querySelectorAll('.edit-btn').forEach(button => {
+                        button.addEventListener('click', (e) => {
+                            const id = e.currentTarget.dataset.id;
+                            editProduct(id);
+                        });
+                    });
+                }
+            } catch (error) {
+                console.error('Error fetching all products for admin:', error);
+                adminProductsList.innerHTML = '<p class="text-red-500">Помилка завантаження товарів для адмін панелі.</p>';
+            }
         }
 
         // --- ФУНКЦІОНАЛ РЕДАГУВАННЯ ТОВАРУ ---
@@ -2841,30 +3192,68 @@
 
         async function init() {
             // Обробник для зміни хешу URL
-            window.addEventListener('hashchange', () => {
-                const currentHash = window.location.hash;
-                if (currentHash === ADMIN_SECRET_PATH) {
-                    showPage('admin');
-                } else if (currentHash === '#cart') {
-                    showPage('cart');
-                } else {
-                    showPage('products');
-                }
-            });
+            window.addEventListener('hashchange', handleHashChange);
 
             // Ініціалізація сторінки при завантаженні
-            const initialHash = window.location.hash;
-            if (initialHash === ADMIN_SECRET_PATH) {
+            await fetchCategories(); // Завантажуємо категорії спочатку
+            handleHashChange(); // Обробляємо поточний хеш
+            showFirstVisitMessage(); // Показати повідомлення про перше відвідування
+        }
+
+        function handleHashChange() {
+            const currentHash = window.location.hash;
+            
+            // Перевіряємо активацію прихованої категорії
+            const wasHiddenVisible = isHiddenCategoryVisible;
+            isHiddenCategoryVisible = currentHash === HIDDEN_CATEGORY_HASH;
+            
+            // Оновлюємо фільтр категорій якщо змінився стан видимості
+            if (wasHiddenVisible !== isHiddenCategoryVisible) {
+                renderCategoryFilter();
+                updateHiddenCategoryIndicator();
+            }
+            
+            // Обробка навігації по сторінках
+            if (currentHash === ADMIN_SECRET_PATH) {
                 showPage('admin');
-            } else if (initialHash === '#cart') {
+            } else if (currentHash === '#cart') {
                 showPage('cart');
+            } else if (currentHash === HIDDEN_CATEGORY_HASH) {
+                showPage('products');
+                // Автоматично встановлюємо фільтр на приховану категорію
+                if (hiddenCategoryId) {
+                    categoryFilter.value = hiddenCategoryId;
+                }
+                fetchProducts();
             } else {
                 showPage('products');
+                // Очищуємо фільтр якщо виходимо з режиму #alk
+                if (wasHiddenVisible && categoryFilter.value == hiddenCategoryId) {
+                    categoryFilter.value = '';
+                }
+                fetchProducts();
             }
+        }
 
-            await fetchCategories(); // Завантажуємо категорії для фільтрації
-            await fetchProducts(); // Завантажуємо товари
-            showFirstVisitMessage(); // Показати повідомлення про перше відвідування
+        function updateHiddenCategoryIndicator() {
+            const existingIndicator = document.getElementById('hidden-category-indicator');
+            
+            if (isHiddenCategoryVisible) {
+                if (!existingIndicator) {
+                    const indicator = document.createElement('div');
+                    indicator.id = 'hidden-category-indicator';
+                    indicator.className = 'bg-warning-orange text-white px-4 py-2 rounded-lg text-sm font-medium mb-4 text-center';
+                    indicator.innerHTML = '🔓 Активований режим перегляду категорії "Алкоголь і куріння"';
+                    
+                    const productsPage = document.getElementById('products-page');
+                    const title = productsPage.querySelector('h1');
+                    title.insertAdjacentElement('afterend', indicator);
+                }
+            } else {
+                if (existingIndicator) {
+                    existingIndicator.remove();
+                }
+            }
         }
 
         init();
